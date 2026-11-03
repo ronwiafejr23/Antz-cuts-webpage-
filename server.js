@@ -32,6 +32,8 @@ const PAYPAL_API = process.env.PAYPAL_ENV === "live"
 // The deposit is set HERE on the server, never by the browser,
 // so nobody can edit the page and pay $0.01 instead.
 const DEPOSIT = "5.00";
+const MEMBERSHIP = "85.00";       // Unlimited Haircuts Membership, one-time 30-day pass
+const MEMBERSHIP_DAYS = 30;
 const CURRENCY = "USD";
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
@@ -75,20 +77,56 @@ function createDepositOrder(booking) {
   });
 }
 
-async function captureOrder(orderId, booking) {
-  const data = await paypal("POST", `/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`);
-  const capture = data.purchase_units?.[0]?.payments?.captures?.[0];
-  const paid = data.status === "COMPLETED" && capture?.amount?.value === DEPOSIT;
+function appendLog(file, entry) {
+  const logFile = path.join(__dirname, file);
+  let log = [];
+  try { log = JSON.parse(fs.readFileSync(logFile, "utf8")); } catch { }
+  log.push(entry);
+  fs.writeFileSync(logFile, JSON.stringify(log, null, 2));
+}
 
+// Capture an approved order and confirm PayPal took exactly the amount we expect.
+async function capture(orderId, expected) {
+  const data = await paypal("POST", `/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`);
+  const cap = data.purchase_units?.[0]?.payments?.captures?.[0];
+  const paid = data.status === "COMPLETED" && cap?.amount?.value === expected;
+  return { data, cap, paid };
+}
+
+async function captureOrder(orderId, booking) {
+  const { data, cap, paid } = await capture(orderId, DEPOSIT);
   if (paid) {
     // Keep a record of paid deposits so Anthony has a list on the server.
-    const logFile = path.join(__dirname, "deposits.json");
-    let log = [];
-    try { log = JSON.parse(fs.readFileSync(logFile, "utf8")); } catch { }
-    log.push({ orderId, captureId: capture.id, amount: DEPOSIT, payer: data.payer?.email_address, booking, paidAt: new Date().toISOString() });
-    fs.writeFileSync(logFile, JSON.stringify(log, null, 2));
+    appendLog("deposits.json", { orderId, captureId: cap.id, amount: DEPOSIT, payer: data.payer?.email_address, booking, paidAt: new Date().toISOString() });
   }
-  return { paid, status: data.status, orderId, captureId: capture?.id, amount: capture?.amount?.value };
+  return { paid, status: data.status, orderId, captureId: cap?.id, amount: cap?.amount?.value };
+}
+
+/* ---------- Unlimited Haircuts Membership ($85 / 30 days) ---------- */
+
+function createMembershipOrder(member) {
+  return paypal("POST", "/v2/checkout/orders", {
+    intent: "CAPTURE",
+    purchase_units: [{
+      description: `Antz Cuts Unlimited Haircuts Membership (${MEMBERSHIP_DAYS} days) - ${member.name || ""}`.slice(0, 127),
+      amount: { currency_code: CURRENCY, value: MEMBERSHIP },
+    }],
+  });
+}
+
+async function captureMembership(orderId, member) {
+  const { data, cap, paid } = await capture(orderId, MEMBERSHIP);
+  let start, expires;
+  if (paid) {
+    start = new Date();
+    expires = new Date(start.getTime() + MEMBERSHIP_DAYS * 24 * 60 * 60 * 1000);
+    appendLog("memberships.json", {
+      orderId, captureId: cap.id, amount: MEMBERSHIP, payer: data.payer?.email_address,
+      name: member.name, phone: member.phone, start: start.toISOString(), expires: expires.toISOString(),
+    });
+  }
+  return { paid, status: data.status, orderId, captureId: cap?.id, amount: cap?.amount?.value,
+           start: start?.toISOString(), expires: expires?.toISOString() };
 }
 
 /* ---------- tiny static file server ---------- */
@@ -99,7 +137,7 @@ const TYPES = {
   ".svg": "image/svg+xml", ".mp4": "video/mp4", ".ico": "image/x-icon",
 };
 // Never serve these over the web.
-const PRIVATE = new Set([".env", ".env.example", "server.js", "package.json", "deposits.json"]);
+const PRIVATE = new Set([".env", ".env.example", "server.js", "package.json", "deposits.json", "memberships.json", "start-server.bat"]);
 
 function serveStatic(req, res) {
   const urlPath = decodeURIComponent(new URL(req.url, "http://x").pathname);
@@ -134,7 +172,7 @@ http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/api/config") {
       // The client ID is public by design; the secret never leaves this file.
-      return sendJson(res, 200, { clientId: CLIENT_ID || null, deposit: DEPOSIT, currency: CURRENCY });
+      return sendJson(res, 200, { clientId: CLIENT_ID || null, deposit: DEPOSIT, membership: MEMBERSHIP, membershipDays: MEMBERSHIP_DAYS, currency: CURRENCY });
     }
     if (req.method === "POST" && req.url === "/api/orders") {
       const { booking = {} } = await readJson(req);
@@ -145,6 +183,16 @@ http.createServer(async (req, res) => {
     if (req.method === "POST" && cap) {
       const { booking = {} } = await readJson(req);
       return sendJson(res, 200, await captureOrder(cap[1], booking));
+    }
+    if (req.method === "POST" && req.url === "/api/membership/orders") {
+      const { member = {} } = await readJson(req);
+      const order = await createMembershipOrder(member);
+      return sendJson(res, 200, { id: order.id });
+    }
+    const mem = req.url.match(/^\/api\/membership\/orders\/([A-Za-z0-9-]+)\/capture$/);
+    if (req.method === "POST" && mem) {
+      const { member = {} } = await readJson(req);
+      return sendJson(res, 200, await captureMembership(mem[1], member));
     }
     if (req.method === "GET") return serveStatic(req, res);
     sendJson(res, 404, { error: "Not found" });

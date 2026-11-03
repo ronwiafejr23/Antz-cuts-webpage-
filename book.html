@@ -35,6 +35,41 @@
     <section style="padding-top: 20px;">
       <div class="container booking">
 
+        <!-- Unlimited Haircuts Membership (PayPal, one-time 30-day pass) -->
+        <div class="card member" id="membership">
+          <button type="button" class="member-badge" id="member-open" aria-expanded="false" aria-controls="member-checkout">
+            <svg class="member-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 8l4.5 3.5L12 5l4.5 6.5L21 8l-2 10H5L3 8z"/>
+              <rect x="5" y="19.5" width="14" height="2" rx="1"/>
+            </svg>
+            <span class="member-text">
+              <span class="member-title">Unlimited Haircuts Membership</span>
+              <span class="member-price"><b id="member-amt">$85</b> / month &middot; tap to join</span>
+            </span>
+          </button>
+
+          <details class="member-policy">
+            <summary>View policy</summary>
+            <ul>
+              <li><b>Unlimited haircuts for up to 1 month</b> (30 days from the day you join).</li>
+              <li><b>On your 5th cut it's still free</b> when you bring someone with you to your appointment.</li>
+              <li>Paid once through PayPal. It doesn't renew on its own; join again any time.</li>
+            </ul>
+          </details>
+
+          <p class="member-active" id="member-status" hidden></p>
+
+          <div class="member-checkout" id="member-checkout" hidden>
+            <div class="row">
+              <label>Name<input type="text" id="member-name" placeholder="Your name"></label>
+              <label>Phone<input type="tel" id="member-phone" placeholder="(555) 555-5555"></label>
+            </div>
+            <p class="hint">Enter your name and a 10-digit phone, then pay with PayPal.</p>
+            <div id="member-paypal"></div>
+            <p class="hint" id="member-msg" aria-live="polite"></p>
+          </div>
+        </div>
+
         <!-- Step 1: service -->
         <div class="card step">
           <h3><span class="step-num">1</span> Choose a service</h3>
@@ -79,6 +114,12 @@
           <h3><span class="step-num">5</span> Hold your spot</h3>
           <p class="summary" id="pay-summary"></p>
           <p class="hint">A <b id="deposit-amt">$5</b> deposit locks in your time and comes off your cut. It helps keep no-shows from costing Anthony a chair.</p>
+          <div class="member-perk" id="member-perk" hidden>
+            <p id="member-perk-text"></p>
+            <label class="check"><input type="checkbox" id="bring-guest"> I'm bringing someone with me</label>
+            <button type="button" class="btn btn-primary" id="member-confirm" disabled>Confirm free cut</button>
+            <p class="hint">Not bringing anyone? Pay the deposit below to book as usual.</p>
+          </div>
           <div id="paypal-buttons"></div>
           <p class="hint" id="pay-msg" aria-live="polite"></p>
           <button type="button" class="btn btn-ghost" id="pay-back">&larr; Change details</button>

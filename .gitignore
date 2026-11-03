@@ -3,6 +3,7 @@
 
 # payment records written by server.js
 deposits.json
+memberships.json
 
 node_modules/
 .DS_Store

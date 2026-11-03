@@ -40,7 +40,11 @@ const KEYS = {
   daysOff: "antz_days_off",
   blockedSlots: "antz_blocked",
   bookings: "antz_bookings",
+  membership: "antz_membership",
 };
+
+// Haircut services the Unlimited Haircuts Membership covers.
+const COVERED_SERVICES = ["first", "adult", "kids"];
 
 /* ---------- STORAGE ---------- */
 
@@ -50,6 +54,20 @@ function load(key) {
 }
 function save(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { }
+}
+
+/* ---------- MEMBERSHIP ---------- */
+
+function activeMembership() {
+  let m = null;
+  try { m = JSON.parse(localStorage.getItem(KEYS.membership)); } catch { }
+  return m && new Date(m.expires) > new Date() ? m : null;
+}
+function saveMembership(m) {
+  try { localStorage.setItem(KEYS.membership, JSON.stringify(m)); } catch { }
+}
+function memberCutsUsed(m) {
+  return load(KEYS.bookings).filter(b => b.membershipId === m.orderId).length;
 }
 
 /* ---------- DATE / TIME HELPERS ---------- */
@@ -328,7 +346,7 @@ function initBookingPage() {
     }
   }
 
-  /* Submit: details -> deposit step */
+  /* Submit: details -> deposit step (or free cut for members) */
   function currentBooking() {
     return {
       serviceId: state.serviceId,
@@ -359,9 +377,36 @@ function initBookingPage() {
     const svc = getService(booking.serviceId);
     $("pay-summary").innerHTML =
       `<b>${svc.name}</b> on <b>${prettyDate(booking.date)}</b> at <b>${prettyTime(booking.time)}</b>`;
+
+    // Members: haircuts 1-4 are free right away; from the 5th cut on they're
+    // free when the member brings someone, otherwise the normal deposit applies.
+    const member = memberCovers(booking);
+    $("member-perk").hidden = true;
+    if (member) {
+      const cutNumber = member.cutsUsed + 1;
+      if (cutNumber < 5) {
+        finishBooking(booking, { member: true, orderId: member.orderId, cutNumber });
+        return;
+      }
+      $("member-perk-text").innerHTML =
+        `<b>Member cut #${cutNumber}.</b> Your 5th cut and beyond are still free when you bring someone with you to your appointment.`;
+      $("bring-guest").checked = false;
+      $("member-confirm").disabled = true;
+      $("member-perk").hidden = false;
+    }
+
     showSteps(true);
     $("step-pay").scrollIntoView({ behavior: "smooth", block: "start" });
     startDeposit(booking);
+  });
+
+  $("bring-guest").addEventListener("change", () => {
+    $("member-confirm").disabled = !$("bring-guest").checked;
+  });
+  $("member-confirm").addEventListener("click", () => {
+    const member = memberCovers(activeBooking);
+    if (!member || !$("bring-guest").checked) return;
+    finishBooking(activeBooking, { member: true, orderId: member.orderId, cutNumber: member.cutsUsed + 1, guest: true });
   });
 
   $("pay-back").addEventListener("click", () => {
@@ -369,10 +414,24 @@ function initBookingPage() {
     $("step-details").scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
-  /* Confirmation: runs only after the deposit is captured */
+  function receiptLine(receipt) {
+    if (!receipt) return "No deposit taken (online payments were offline).";
+    if (receipt.member) {
+      return `Free with your Unlimited Haircuts Membership · cut #${receipt.cutNumber}` +
+             (receipt.guest ? " · bringing a guest" : "");
+    }
+    return `Deposit paid: $${receipt.amount} · PayPal order ${receipt.orderId}`;
+  }
+
+  /* Confirmation: runs after the deposit is captured (or a member cut is confirmed) */
   function finishBooking(booking, receipt) {
-    if (!addBooking({ ...booking, deposit: receipt })) {
-      $("pay-msg").textContent = "That time was taken while you paid. Your deposit went through, so contact Anthony and he'll fix your time.";
+    const saved = { ...booking, deposit: receipt && !receipt.member ? receipt : null,
+                    membershipId: receipt && receipt.member ? receipt.orderId : undefined,
+                    guest: receipt && receipt.guest ? true : undefined };
+    if (!addBooking(saved)) {
+      $("pay-msg").textContent = receipt && !receipt.member
+        ? "That time was taken while you paid. Your deposit went through, so contact Anthony and he'll fix your time."
+        : "Sorry, that time was just taken. Please pick another.";
       $("pay-msg").className = "hint error";
       return;
     }
@@ -382,16 +441,17 @@ function initBookingPage() {
     confirmBox.hidden = false;
     $("confirm-text").textContent =
       `${booking.name}, you're set for ${svc.name} on ${prettyDate(booking.date)} at ${prettyTime(booking.time)}.`;
-    $("confirm-receipt").textContent = receipt
-      ? `Deposit paid: $${receipt.amount} · PayPal order ${receipt.orderId}`
-      : "No deposit taken (online payments were offline).";
+    $("confirm-receipt").textContent = receiptLine(receipt);
+    renderMembership();
 
     // Pre-filled email so Anthony actually gets the booking
     const subject = `Booking: ${svc.name} – ${prettyDate(booking.date)} ${prettyTime(booking.time)}`;
     const body =
       `Name: ${booking.name}\nPhone: ${booking.phone}\nService: ${svc.name} (${svc.price})\n` +
       `Date: ${prettyDate(booking.date)}\nTime: ${prettyTime(booking.time)}\n` +
-      (receipt ? `Deposit: $${receipt.amount} paid (PayPal order ${receipt.orderId})` : "Deposit: none");
+      (!receipt ? "Deposit: none"
+        : receipt.member ? `Membership: free cut #${receipt.cutNumber}${receipt.guest ? " (bringing a guest)" : ""} (PayPal order ${receipt.orderId})`
+        : `Deposit: $${receipt.amount} paid (PayPal order ${receipt.orderId})`);
     const mail = document.createElement("a");
     mail.className = "btn btn-primary";
     mail.href = `mailto:${BARBER_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
@@ -401,11 +461,13 @@ function initBookingPage() {
     confirmBox.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  /* PayPal deposit
+  /* PayPal
      The browser only ever sees the public client ID. Creating and capturing
-     the payment goes through server.js, which holds the secret key. */
+     payments goes through server.js, which holds the secret key and sets
+     the amounts ($5 deposit, $85 membership). */
   let paypalReady = null;    // promise: loads config + PayPal SDK once
-  let activeBooking = null;  // the booking the buttons are paying for
+  let activeBooking = null;  // the booking the deposit buttons are paying for
+  let depositButtons = false;
 
   function loadPayPal() {
     if (paypalReady) return paypalReady;
@@ -414,6 +476,8 @@ function initBookingPage() {
       .then(cfg => {
         if (!cfg.clientId) throw new Error("no keys");
         $("deposit-amt").textContent = `$${cfg.deposit}`;
+        const amt = $("member-amt");  // only shown while not a member
+        if (cfg.membership && amt) amt.textContent = `$${Number(cfg.membership)}`;
         return new Promise((resolve, reject) => {
           const s = document.createElement("script");
           s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(cfg.clientId)}` +
@@ -422,10 +486,15 @@ function initBookingPage() {
           s.onerror = () => reject(new Error("sdk"));
           document.head.appendChild(s);
         });
-      })
-      .then(renderPayPalButtons);
+      });
     paypalReady.catch(() => { paypalReady = null; });  // allow a retry later
     return paypalReady;
+  }
+
+  function paypalErrorText(err, what) {
+    return err.message === "no keys" ? "PayPal keys are missing. Add them to .env and restart the server." :
+           err.message === "sdk"     ? "PayPal didn't accept the Client ID. Re-copy it into .env from developer.paypal.com and restart the server." :
+           `Online ${what} need the site's server. Run "npm start" and open http://localhost:3000/book.html.`;
   }
 
   async function postJson(url, data) {
@@ -481,24 +550,121 @@ function initBookingPage() {
     const msg = $("pay-msg");
     msg.textContent = "";
     msg.className = "hint";
-    loadPayPal().catch(err => {
-      // Opened with Live Server (server.js not running) or keys missing.
-      msg.className = "hint error";
-      msg.textContent =
-        err.message === "no keys" ? "PayPal keys are missing. Add them to .env and restart the server." :
-        err.message === "sdk"     ? "PayPal didn't accept the Client ID. Re-copy it into .env from developer.paypal.com and restart the server." :
-        'Online deposits need the site\'s server. Run "npm start" and open http://localhost:3000/book.html.';
-      if (!$("skip-deposit")) {
-        const skip = document.createElement("button");
-        skip.type = "button";
-        skip.id = "skip-deposit";
-        skip.className = "btn btn-ghost";
-        skip.textContent = "Book without deposit";
-        skip.addEventListener("click", () => finishBooking(activeBooking, null));
-        $("pay-back").before(skip);
-      }
-    });
+    loadPayPal()
+      .then(() => { if (!depositButtons) { depositButtons = true; return renderPayPalButtons(); } })
+      .catch(err => {
+        // Opened with Live Server (server.js not running) or keys missing.
+        msg.className = "hint error";
+        msg.textContent = paypalErrorText(err, "deposits");
+        if (!$("skip-deposit")) {
+          const skip = document.createElement("button");
+          skip.type = "button";
+          skip.id = "skip-deposit";
+          skip.className = "btn btn-ghost";
+          skip.textContent = "Book without deposit";
+          skip.addEventListener("click", () => finishBooking(activeBooking, null));
+          $("pay-back").before(skip);
+        }
+      });
   }
+
+  /* ---------- Unlimited Haircuts Membership ---------- */
+  let memberButtons = false;
+
+  function memberCovers(booking) {
+    const m = activeMembership();
+    if (!m || !booking || !COVERED_SERVICES.includes(booking.serviceId)) return null;
+    if (parseKey(booking.date) > new Date(m.expires)) return null;  // cut must fall inside the month
+    return { ...m, cutsUsed: memberCutsUsed(m) };
+  }
+
+  function renderMembership() {
+    const m = activeMembership();
+    const status = $("member-status");
+    if (m) {
+      const until = new Date(m.expires).toLocaleDateString("en-US", { month: "long", day: "numeric" });
+      const used = memberCutsUsed(m);
+      status.innerHTML = `<b>✓ Active member</b>${m.name ? ` · ${m.name}` : ""} · through ${until} · ${used} cut${used === 1 ? "" : "s"} used`;
+      status.hidden = false;
+      $("member-open").classList.add("is-member");
+      $("member-open").querySelector(".member-price").textContent = "You're a member · haircuts are on us";
+      $("member-checkout").hidden = true;
+      $("member-open").setAttribute("aria-expanded", "false");
+    } else {
+      status.hidden = true;
+      $("member-open").classList.remove("is-member");
+      $("member-open").querySelector(".member-price").innerHTML = '<b id="member-amt">$85</b> / month &middot; tap to join';
+    }
+  }
+
+  function memberFormOk() {
+    return $("member-name").value.trim() && $("member-phone").value.replace(/\D/g, "").length >= 10;
+  }
+
+  $("member-open").addEventListener("click", () => {
+    if (activeMembership()) {
+      $("membership").querySelector("details").open = true;  // members just see the policy
+      return;
+    }
+    const box = $("member-checkout");
+    box.hidden = !box.hidden;
+    $("member-open").setAttribute("aria-expanded", String(!box.hidden));
+    if (box.hidden) return;
+    // Carry over anything already typed in step 4
+    if (!$("member-name").value) $("member-name").value = $("name").value;
+    if (!$("member-phone").value) $("member-phone").value = $("phone").value;
+    const msg = $("member-msg");
+    msg.textContent = "";
+    msg.className = "hint";
+    loadPayPal()
+      .then(() => { if (!memberButtons) { memberButtons = true; return renderMemberButtons(); } })
+      .catch(err => {
+        msg.className = "hint error";
+        msg.textContent = paypalErrorText(err, "memberships");
+      });
+  });
+
+  function renderMemberButtons() {
+    const msg = $("member-msg");
+    const member = () => ({ name: $("member-name").value.trim(), phone: $("member-phone").value.trim() });
+    return paypal.Buttons({
+      style: { layout: "vertical", color: "gold", shape: "pill", label: "pay" },
+      onClick: (data, actions) => {
+        if (memberFormOk()) { msg.textContent = ""; return actions.resolve(); }
+        msg.textContent = "Add your name and a 10-digit phone number first.";
+        msg.className = "hint error";
+        return actions.reject();
+      },
+      createOrder: async () => (await postJson("/api/membership/orders", { member: member() })).id,
+      onApprove: async data => {
+        msg.textContent = "Activating your membership…";
+        msg.className = "hint";
+        const r = await postJson(`/api/membership/orders/${data.orderID}/capture`, { member: member() });
+        if (!r.paid) {
+          msg.textContent = `Payment not completed (status: ${r.status}). Please try again.`;
+          msg.className = "hint error";
+          return;
+        }
+        saveMembership({ ...member(), orderId: r.orderId, start: r.start, expires: r.expires });
+        renderMembership();
+        // If they were in the middle of booking a haircut, apply the membership right away.
+        if (!$("step-pay").hidden && memberCovers(activeBooking)) {
+          $("book-form").requestSubmit();
+        }
+      },
+      onCancel: () => {
+        msg.textContent = "Payment cancelled. You haven't been charged.";
+        msg.className = "hint error";
+      },
+      onError: err => {
+        console.error(err);
+        msg.textContent = "PayPal had a problem. Please try again.";
+        msg.className = "hint error";
+      },
+    }).render("#member-paypal");
+  }
+
+  renderMembership();
 
   // Links from other pages can pre-pick a service: book.html?service=adult
   const fromLink = new URLSearchParams(location.search).get("service");
