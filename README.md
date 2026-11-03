@@ -17,9 +17,9 @@ Book a cut by chatting. **Google Gemini** works out what you want ("fade for my 
 4. Pay the $5 deposit with the PayPal sandbox buyer below. The booking confirms with the PayPal order ID.
 5. Tap the gold **Unlimited Haircuts Membership** card, pay $85 in sandbox, then book again: haircuts 1–4 skip the deposit, and the 5th is free when you bring someone.
 
-**PayPal sandbox buyer (fake money):**
-- Email: `ADD-SANDBOX-PERSONAL-EMAIL@personal.example.com`
-- Password: `ADD-SANDBOX-PASSWORD`
+**PayPal sandbox buyer (test account, fake money, no real charges):**
+- Email: `sb-e5dzb53696369@personal.example.com`
+- Password: `HH!J$Cq2`
 
 ## Features
 
