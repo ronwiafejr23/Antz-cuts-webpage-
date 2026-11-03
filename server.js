@@ -139,22 +139,27 @@ async function captureMembership(orderId, member) {
    membership). */
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
+// I use the fast Flash-Lite model first and fall back to Flash if it's overloaded.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+const GEMINI_FALLBACK = process.env.GEMINI_FALLBACK || "gemini-3.6-flash";
 
-const ASSISTANT_SCHEMA = {
+// Gemini rejects empty enum values, so I use "none" for "not given".
+function assistantSchema(serviceIds) {
+  return {
   type: "OBJECT",
   properties: {
     reply:     { type: "STRING", description: "1-3 short, friendly sentences to show the customer." },
     action:    { type: "STRING", enum: ["none", "book", "join_membership"] },
-    serviceId: { type: "STRING", description: "One of the service ids, or empty." },
+    serviceId: { type: "STRING", enum: ["none", ...serviceIds] },
     date:      { type: "STRING", description: "YYYY-MM-DD, or empty if the customer didn't say a day." },
     time:      { type: "STRING", description: "HH:MM 24-hour, or empty." },
-    timeRule:  { type: "STRING", enum: ["", "exact", "after", "before", "earliest", "latest"] },
+    timeRule:  { type: "STRING", enum: ["none", "exact", "after", "before", "earliest", "latest"] },
     name:      { type: "STRING", description: "Customer's name if they gave it, else empty." },
     phone:     { type: "STRING", description: "Customer's phone if they gave it, else empty." },
   },
   required: ["reply", "action", "serviceId", "date", "time", "timeRule", "name", "phone"],
-};
+  };
+}
 
 function assistantPrompt(ctx) {
   const services = (ctx.services || []).slice(0, 20)
@@ -187,7 +192,12 @@ Rules:
   "evening" -> 17:00 "after". "asap"/"soonest"/no time -> timeRule "earliest". Leave time empty when not given.
 - If they ask about joining, unlimited cuts or a membership, set action "join_membership" and briefly explain it.
 - For questions (prices, hours, policy), answer with action "none". Never invent services, prices or hours.
-- Don't promise a specific slot is free; the website checks real availability and will confirm.
+- Never say it's booked or confirmed. Say you're checking or pulling up times; the website finds the real
+  open slot and the customer confirms it with PayPal.
+- Use serviceId "none" and timeRule "none" when they don't apply.
+- If they ask for a day the shop is closed or a time outside hours, still set action "book" with what they asked;
+  the website offers the closest real opening. Mention it's closed then in your reply.
+- In your reply text, write times like "2:35 PM", never "14:35". The "time" field itself stays HH:MM 24-hour.
 - Keep replies short, warm and casual. No markdown.`;
 }
 
@@ -211,24 +221,46 @@ async function askAssistant({ message, history = [], context = {} }) {
     .map(h => ({ role: h.role, parts: [{ text: String(h.text).slice(0, 600) }] }));
   contents.push({ role: "user", parts: [{ text }] });
 
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: assistantPrompt(context) }] },
-      contents,
-      generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: ASSISTANT_SCHEMA },
-    }),
+  const serviceIds = (context.services || []).map(x => String(x.id)).filter(id => /^[a-z0-9_-]{1,20}$/.test(id)).slice(0, 20);
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: assistantPrompt(context) }] },
+    contents,
+    generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: assistantSchema(serviceIds) },
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    console.error("Gemini error:", data.error || res.status);
-    throw Object.assign(new Error("The AI assistant is busy right now. Try again in a moment."), { status: 502 });
+
+  let data = {};
+  for (const model of [GEMINI_MODEL, GEMINI_FALLBACK]) {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
+      body,
+    });
+    data = await res.json().catch(() => ({}));
+    if (res.ok) break;
+    console.error(`Gemini ${model} error:`, data.error?.status || res.status, data.error?.message || "");
+    // Only a busy/overloaded model is worth retrying on the other model.
+    if (![429, 500, 503].includes(res.status) || model === GEMINI_FALLBACK) {
+      throw Object.assign(new Error("The AI assistant is busy right now. Try again in a moment."), { status: 502 });
+    }
   }
   const raw = data.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("") || "{}";
   let out;
   try { out = JSON.parse(raw); } catch { out = { reply: raw, action: "none" }; }
+  // I turn "none" back into empty values for the browser.
+  for (const k of ["serviceId", "timeRule", "date", "time", "name", "phone"]) if (out[k] === "none") out[k] = "";
+  out.time = toHHMM24(out.time);
   return out;
+}
+
+// In case Gemini answers "5 PM" or "12:00 PM" in the time field, I convert it to "17:00" / "12:00".
+function toHHMM24(t) {
+  const m = String(t || "").trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m?\.?$|^(\d{1,2}):(\d{2})$/i);
+  if (!m) return "";
+  let h, min;
+  if (m[4] !== undefined) { h = +m[4]; min = +m[5]; }
+  else { h = +m[1] % 12 + (m[3].toLowerCase() === "p" ? 12 : 0); min = +(m[2] || 0); }
+  if (h > 23 || min > 59) return "";
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }
 
 /* ---------- tiny static file server ---------- */
