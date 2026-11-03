@@ -26,14 +26,14 @@ const WEEKLY_HOURS = {
 
 const SERVICES = [
   { id: "first",   name: "First Haircut (new clients)", price: "$5",     minutes: 30 },
-  { id: "adult",   name: "Adult Haircut (12+)",         price: "$15",    minutes: 30 },
-  { id: "kids",    name: "Kids Haircut (11 & under)",   price: "$10",    minutes: 25 },
+  { id: "adult",   name: "Adult Haircut (12+)",         price: "$20",    minutes: 30 },
+  { id: "kids",    name: "Kids Haircut (11 & under)",   price: "$15",    minutes: 25 },
   { id: "shave",   name: "Shave",                       price: "$10",    minutes: 20 },
   { id: "beard",   name: "Beard",                       price: "$5",     minutes: 5  },
   { id: "beardmu", name: "Beard & Mustache",            price: "$5",     minutes: 10 },
   { id: "mus",     name: "Mustache",                    price: "$5",     minutes: 5  },
   { id: "brows",   name: "Eyebrows",                    price: "$5",     minutes: 5  },
-  { id: "house",   name: "House Call",                  price: "$25–35", minutes: 60 },
+  { id: "house",   name: "House Call",                  price: "$45",    minutes: 60 },
 ];
 
 const KEYS = {
@@ -498,6 +498,10 @@ function initBookingPage() {
       }
     });
   }
+
+  // Links from other pages can pre-pick a service: book.html?service=adult
+  const fromLink = new URLSearchParams(location.search).get("service");
+  if (getService(fromLink)) state.serviceId = fromLink;
 
   renderAll();
 }
