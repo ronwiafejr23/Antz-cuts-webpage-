@@ -2,12 +2,16 @@
    booking.js — Antz Cuts booking page
    Powers book.html: pick a service -> pick a day -> pick a time -> details.
 
-   Bookings are saved in this browser's localStorage (prototype only), so
-   Anthony can't see them from his own phone. That's why the confirmation
-   screen has a "Send to Anthony" button that opens a pre-filled email.
+   I save bookings in this browser's localStorage (prototype only), so
+   Anthony can't see them from his own phone. That's why I gave the
+   confirmation screen a "Send to Anthony" button that opens a pre-filled email.
+
+   I added a gold "Unlimited Haircuts Membership" card that sells a one-time
+   $85 30-day pass through PayPal, and a "Book by chatting" box powered by
+   Gemini (through server.js) that fills in the booking for the customer.
    ========================================================================== */
 
-/* ---------- SETTINGS (edit these) ---------- */
+/* ---------- SETTINGS (I edit these when Anthony's hours or prices change) ---------- */
 
 const BARBER_EMAIL = "antscutz@gmail.com";
 const SLOT_MINUTES = 30;
@@ -43,7 +47,7 @@ const KEYS = {
   membership: "antz_membership",
 };
 
-// Haircut services the Unlimited Haircuts Membership covers.
+// The haircut services I let the Unlimited Haircuts Membership cover.
 const COVERED_SERVICES = ["first", "adult", "kids"];
 
 /* ---------- STORAGE ---------- */
@@ -171,8 +175,8 @@ function cancelBooking(id) {
    ========================================================================== */
 
 function initBookingPage() {
-  // DOM selection: every lookup on this page goes through querySelector.
-  // $("name") is short for document.querySelector("#name").
+  // DOM selection: I send every lookup on this page through querySelector.
+  // $("name") is my shorthand for document.querySelector("#name").
   const $ = id => document.querySelector("#" + id);
   const picker = $("service-picker");
   if (!picker) return;
@@ -201,7 +205,7 @@ function initBookingPage() {
       btn.addEventListener("click", () => {
         state.serviceId = svc.id;
         state.time = null;
-        // If the chosen day no longer fits this service, clear it.
+        // If the chosen day no longer fits this service, I clear it.
         if (state.date && availableTimes(state.date, svc.id).length === 0) state.date = null;
         renderAll();
         $("step-date").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -327,8 +331,8 @@ function initBookingPage() {
   });
 
   /* Decision based on user input: is the phone number usable?
-     Reads what the user typed (.value), decides with if / else if / else,
-     and shows visible feedback under the form (.textContent). */
+     I read what the user typed (.value), decide with if / else if / else,
+     and show visible feedback under the form (.textContent). */
   function checkPhone() {
     const msg = $("phone-msg");
     const typed = $("phone").value.trim();
@@ -358,7 +362,7 @@ function initBookingPage() {
     };
   }
 
-  // Show only the deposit step, or only steps 1-4.
+  // I show only the deposit step, or only steps 1-4.
   function showSteps(showPay) {
     document.querySelectorAll(".step").forEach(el => {
       el.hidden = showPay ? el.id !== "step-pay" : el.id === "step-pay";
@@ -378,8 +382,8 @@ function initBookingPage() {
     $("pay-summary").innerHTML =
       `<b>${svc.name}</b> on <b>${prettyDate(booking.date)}</b> at <b>${prettyTime(booking.time)}</b>`;
 
-    // Members: haircuts 1-4 are free right away; from the 5th cut on they're
-    // free when the member brings someone, otherwise the normal deposit applies.
+    // Members: I make haircuts 1-4 free right away; from the 5th cut on they're
+    // free when the member brings someone, otherwise I fall back to the deposit.
     const member = memberCovers(booking);
     $("member-perk").hidden = true;
     if (member) {
@@ -444,7 +448,7 @@ function initBookingPage() {
     $("confirm-receipt").textContent = receiptLine(receipt);
     renderMembership();
 
-    // Pre-filled email so Anthony actually gets the booking
+    // I pre-fill an email so Anthony actually gets the booking
     const subject = `Booking: ${svc.name} – ${prettyDate(booking.date)} ${prettyTime(booking.time)}`;
     const body =
       `Name: ${booking.name}\nPhone: ${booking.phone}\nService: ${svc.name} (${svc.price})\n` +
@@ -462,10 +466,10 @@ function initBookingPage() {
   }
 
   /* PayPal
-     The browser only ever sees the public client ID. Creating and capturing
-     payments goes through server.js, which holds the secret key and sets
+     I only ever give the browser the public client ID. I send creating and
+     capturing payments through server.js, which holds my secret key and sets
      the amounts ($5 deposit, $85 membership). */
-  let paypalReady = null;    // promise: loads config + PayPal SDK once
+  let paypalReady = null;    // promise: I load config + the PayPal SDK once
   let activeBooking = null;  // the booking the deposit buttons are paying for
   let depositButtons = false;
 
@@ -487,7 +491,7 @@ function initBookingPage() {
           document.head.appendChild(s);
         });
       });
-    paypalReady.catch(() => { paypalReady = null; });  // allow a retry later
+    paypalReady.catch(() => { paypalReady = null; });  // so I can retry later
     return paypalReady;
   }
 
@@ -553,7 +557,7 @@ function initBookingPage() {
     loadPayPal()
       .then(() => { if (!depositButtons) { depositButtons = true; return renderPayPalButtons(); } })
       .catch(err => {
-        // Opened with Live Server (server.js not running) or keys missing.
+        // I land here when the page is on Live Server (server.js not running) or keys are missing.
         msg.className = "hint error";
         msg.textContent = paypalErrorText(err, "deposits");
         if (!$("skip-deposit")) {
@@ -574,7 +578,7 @@ function initBookingPage() {
   function memberCovers(booking) {
     const m = activeMembership();
     if (!m || !booking || !COVERED_SERVICES.includes(booking.serviceId)) return null;
-    if (parseKey(booking.date) > new Date(m.expires)) return null;  // cut must fall inside the month
+    if (parseKey(booking.date) > new Date(m.expires)) return null;  // I only cover cuts inside the month
     return { ...m, cutsUsed: memberCutsUsed(m) };
   }
 
@@ -603,14 +607,14 @@ function initBookingPage() {
 
   $("member-open").addEventListener("click", () => {
     if (activeMembership()) {
-      $("membership").querySelector("details").open = true;  // members just see the policy
+      $("membership").querySelector("details").open = true;  // for members I just show the policy
       return;
     }
     const box = $("member-checkout");
     box.hidden = !box.hidden;
     $("member-open").setAttribute("aria-expanded", String(!box.hidden));
     if (box.hidden) return;
-    // Carry over anything already typed in step 4
+    // I carry over anything already typed in step 4
     if (!$("member-name").value) $("member-name").value = $("name").value;
     if (!$("member-phone").value) $("member-phone").value = $("phone").value;
     const msg = $("member-msg");
@@ -647,7 +651,7 @@ function initBookingPage() {
         }
         saveMembership({ ...member(), orderId: r.orderId, start: r.start, expires: r.expires });
         renderMembership();
-        // If they were in the middle of booking a haircut, apply the membership right away.
+        // If they were in the middle of booking a haircut, I apply the membership right away.
         if (!$("step-pay").hidden && memberCovers(activeBooking)) {
           $("book-form").requestSubmit();
         }
@@ -667,8 +671,8 @@ function initBookingPage() {
   renderMembership();
 
   /* ---------- AI booking assistant ----------
-     server.js asks Gemini to turn the message into intent (service, day,
-     time rule, name, phone). Here we match that intent against the REAL
+     My server.js asks Gemini to turn the message into intent (service, day,
+     time rule, name, phone). Here I match that intent against the REAL
      open slots, fill in the form, and leave the PayPal step to the customer. */
   const chat = { history: [], busy: false };
 
@@ -691,7 +695,7 @@ function initBookingPage() {
     };
   }
 
-  // Choose a real open slot that fits what the customer asked for.
+  // I choose a real open slot that fits what the customer asked for.
   function pickSlot(serviceId, intent) {
     const asked = /^\d{4}-\d{2}-\d{2}$/.test(intent.date || "") ? intent.date : null;
     const want = /^\d{2}:\d{2}$/.test(intent.time || "") ? intent.time : null;
@@ -708,7 +712,7 @@ function initBookingPage() {
       if (want && rule === "exact") {
         const exact = times.find(t => t === want);
         if (exact) return { date: key, time: exact, onAskedDay: key === asked };
-        // No exact match: offer the closest time that day instead.
+        // No exact match: I offer the closest time that day instead.
         times = times.slice().sort((a, b) => Math.abs(toMinutes(a) - toMinutes(want)) - Math.abs(toMinutes(b) - toMinutes(want)));
       }
       if (times.length) {
@@ -804,7 +808,7 @@ function initBookingPage() {
   $("chat-chips").addEventListener("click", e => { if (e.target.matches(".chip")) sendChat(e.target.textContent); });
   say("ai", "Hey! I'm the Antz Cuts booking assistant. What can I set up for you?");
 
-  // Links from other pages can pre-pick a service: book.html?service=adult
+  // I let links from other pages pre-pick a service: book.html?service=adult
   const fromLink = new URLSearchParams(location.search).get("service");
   if (getService(fromLink)) state.serviceId = fromLink;
 

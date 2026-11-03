@@ -1,6 +1,6 @@
-/* sw.js — makes Antz Cuts installable and quick to open.
-   Pages and styles: network first, cached copy if offline.
-   Images: cache first. API calls (/api/*), PayPal and videos: never cached. */
+/* sw.js — I use this to make Antz Cuts installable and quick to open.
+   Pages and styles: I try the network first and fall back to my cached copy offline.
+   Images: I serve from cache first. API calls (/api/*), PayPal and videos: I never cache them. */
 
 const CACHE = "antz-cuts-v2";
 const SHELL = [
@@ -24,7 +24,7 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   const req = event.request;
   const url = new URL(req.url);
-  if (req.method !== "GET" || url.origin !== location.origin) return;   // PayPal etc. go straight to the network
+  if (req.method !== "GET" || url.origin !== location.origin) return;   // I send PayPal etc. straight to the network
   if (url.pathname.startsWith("/api/") || url.pathname.endsWith(".mp4")) return;
 
   if (/\.(png|jpe?g|svg|webp)$/i.test(url.pathname)) {

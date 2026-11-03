@@ -1,9 +1,10 @@
 /* ==========================================================================
    server.js — Antz Cuts local server + PayPal sandbox deposits
 
-   Why a server? PayPal needs a SECRET key to create and capture payments.
-   A secret can never live in browser code (anyone could read it), so this
-   small Node server keeps it in .env and talks to PayPal for the page.
+   Why I added a server: PayPal needs a SECRET key to create and capture
+   payments, and a secret can never live in browser code (anyone could read
+   it). So I keep it in .env here and this small Node server talks to PayPal
+   and Gemini for the page.
 
    Run:   npm start      then open http://localhost:3000
    Needs: Node 18+ (uses the built-in fetch), no npm packages.
@@ -13,7 +14,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-/* ---------- load .env (tiny parser, so no dotenv package needed) ---------- */
+/* ---------- load .env (I wrote a tiny parser so I don't need dotenv) ---------- */
 const envFile = path.join(__dirname, ".env");
 if (fs.existsSync(envFile)) {
   for (const line of fs.readFileSync(envFile, "utf8").split(/\r?\n/)) {
@@ -29,7 +30,7 @@ const PAYPAL_API = process.env.PAYPAL_ENV === "live"
   ? "https://api-m.paypal.com"
   : "https://api-m.sandbox.paypal.com";
 
-// The deposit is set HERE on the server, never by the browser,
+// I set the prices HERE on the server, never in the browser,
 // so nobody can edit the page and pay $0.01 instead.
 const DEPOSIT = "5.00";
 const MEMBERSHIP = "85.00";       // Unlimited Haircuts Membership, one-time 30-day pass
@@ -85,7 +86,7 @@ function appendLog(file, entry) {
   fs.writeFileSync(logFile, JSON.stringify(log, null, 2));
 }
 
-// Capture an approved order and confirm PayPal took exactly the amount we expect.
+// I capture the approved order and check PayPal took exactly the amount I expect.
 async function capture(orderId, expected) {
   const data = await paypal("POST", `/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`);
   const cap = data.purchase_units?.[0]?.payments?.captures?.[0];
@@ -96,7 +97,7 @@ async function capture(orderId, expected) {
 async function captureOrder(orderId, booking) {
   const { data, cap, paid } = await capture(orderId, DEPOSIT);
   if (paid) {
-    // Keep a record of paid deposits so Anthony has a list on the server.
+    // I keep a record of paid deposits so Anthony has a list on the server.
     appendLog("deposits.json", { orderId, captureId: cap.id, amount: DEPOSIT, payer: data.payer?.email_address, booking, paidAt: new Date().toISOString() });
   }
   return { paid, status: data.status, orderId, captureId: cap?.id, amount: cap?.amount?.value };
@@ -131,10 +132,11 @@ async function captureMembership(orderId, member) {
 
 /* ---------- AI booking assistant (Google Gemini) ----------
    The customer types something like "fade for my son friday after 5".
-   Gemini turns it into structured booking intent (service, day, time rule,
-   name, phone) plus a short friendly reply. The browser then matches that
-   intent against REAL open slots, so the AI can never double-book a chair.
-   The final step is always a PayPal payment (deposit or membership). */
+   I have Gemini turn it into structured booking intent (service, day, time
+   rule, name, phone) plus a short friendly reply. Then my browser code
+   matches that intent against REAL open slots, so the AI can never
+   double-book a chair. I always finish with a PayPal payment (deposit or
+   membership). */
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
@@ -189,7 +191,7 @@ Rules:
 - Keep replies short, warm and casual. No markdown.`;
 }
 
-// Very small in-memory rate limit so a public demo can't burn the API key.
+// I added a small in-memory rate limit so a public demo can't burn my API key.
 const hits = new Map();
 function rateLimited(ip) {
   const now = Date.now(), windowMs = 10 * 60 * 1000, max = 40;
@@ -237,7 +239,7 @@ const TYPES = {
   ".svg": "image/svg+xml", ".mp4": "video/mp4", ".ico": "image/x-icon",
   ".webmanifest": "application/manifest+json",
 };
-// Never serve these over the web.
+// I never serve these over the web.
 const PRIVATE = new Set([".env", ".env.example", "server.js", "package.json", "deposits.json", "memberships.json", "start-server.bat", "render.yaml"]);
 
 function serveStatic(req, res) {
@@ -272,7 +274,7 @@ function sendJson(res, status, data) {
 http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/api/config") {
-      // The client ID is public by design; the secret never leaves this file.
+      // The client ID is public by design; I never let the secret leave this file.
       return sendJson(res, 200, { clientId: CLIENT_ID || null, deposit: DEPOSIT, membership: MEMBERSHIP, membershipDays: MEMBERSHIP_DAYS, currency: CURRENCY, assistant: Boolean(GEMINI_KEY) });
     }
     if (req.method === "POST" && req.url === "/api/orders") {

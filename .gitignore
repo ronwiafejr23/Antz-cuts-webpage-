@@ -1,7 +1,7 @@
 # secrets: never commit
 .env
 
-# payment records written by server.js
+# payment records my server.js writes
 deposits.json
 memberships.json
 
