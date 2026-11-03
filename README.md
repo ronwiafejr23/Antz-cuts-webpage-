@@ -49,8 +49,8 @@ Customer ──chat──▶ book.html ──POST /api/assistant──▶ server
 Needs **Node.js 18+**. There are no npm packages to install.
 
 ```bash
-git clone https://github.com/ronwiafejr23/Ant-s-cuts-webpage-.git
-cd Ant-s-cuts-webpage-
+git clone https://github.com/ronwiafejr23/Antz-cuts-webpage-.git
+cd Antz-cuts-webpage-
 cp .env.example .env        # Windows: copy .env.example .env
 ```
 
