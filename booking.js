@@ -328,11 +328,9 @@ function initBookingPage() {
     }
   }
 
-  /* Submit */
-  $("book-form").addEventListener("submit", e => {
-    e.preventDefault();
-    const svc = getService(state.serviceId);
-    const booking = {
+  /* Submit: details -> deposit step */
+  function currentBooking() {
+    return {
       serviceId: state.serviceId,
       date: state.date,
       time: state.time,
@@ -340,26 +338,60 @@ function initBookingPage() {
       phone: $("phone").value.trim(),
       created: new Date().toISOString(),
     };
+  }
 
-    if (!addBooking(booking)) {
+  // Show only the deposit step, or only steps 1-4.
+  function showSteps(showPay) {
+    document.querySelectorAll(".step").forEach(el => {
+      el.hidden = showPay ? el.id !== "step-pay" : el.id === "step-pay";
+    });
+  }
+
+  $("book-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const booking = currentBooking();
+    if (!availableTimes(booking.date, booking.serviceId).includes(booking.time)) {
       alert("Sorry, that time was just taken. Please pick another.");
       state.time = null;
       renderAll();
       return;
     }
+    const svc = getService(booking.serviceId);
+    $("pay-summary").innerHTML =
+      `<b>${svc.name}</b> on <b>${prettyDate(booking.date)}</b> at <b>${prettyTime(booking.time)}</b>`;
+    showSteps(true);
+    $("step-pay").scrollIntoView({ behavior: "smooth", block: "start" });
+    startDeposit(booking);
+  });
 
-    // Swap the steps for the confirmation card
+  $("pay-back").addEventListener("click", () => {
+    showSteps(false);
+    $("step-details").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  /* Confirmation: runs only after the deposit is captured */
+  function finishBooking(booking, receipt) {
+    if (!addBooking({ ...booking, deposit: receipt })) {
+      $("pay-msg").textContent = "That time was taken while you paid. Your deposit went through, so contact Anthony and he'll fix your time.";
+      $("pay-msg").className = "hint error";
+      return;
+    }
+    const svc = getService(booking.serviceId);
     document.querySelectorAll(".step").forEach(el => (el.hidden = true));
     const confirmBox = $("confirmation");
     confirmBox.hidden = false;
     $("confirm-text").textContent =
       `${booking.name}, you're set for ${svc.name} on ${prettyDate(booking.date)} at ${prettyTime(booking.time)}.`;
+    $("confirm-receipt").textContent = receipt
+      ? `Deposit paid: $${receipt.amount} · PayPal order ${receipt.orderId}`
+      : "No deposit taken (online payments were offline).";
 
     // Pre-filled email so Anthony actually gets the booking
     const subject = `Booking: ${svc.name} – ${prettyDate(booking.date)} ${prettyTime(booking.time)}`;
     const body =
       `Name: ${booking.name}\nPhone: ${booking.phone}\nService: ${svc.name} (${svc.price})\n` +
-      `Date: ${prettyDate(booking.date)}\nTime: ${prettyTime(booking.time)}`;
+      `Date: ${prettyDate(booking.date)}\nTime: ${prettyTime(booking.time)}\n` +
+      (receipt ? `Deposit: $${receipt.amount} paid (PayPal order ${receipt.orderId})` : "Deposit: none");
     const mail = document.createElement("a");
     mail.className = "btn btn-primary";
     mail.href = `mailto:${BARBER_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
@@ -367,7 +399,105 @@ function initBookingPage() {
     confirmBox.insertBefore(mail, confirmBox.querySelector(".btn-ghost"));
 
     confirmBox.scrollIntoView({ behavior: "smooth", block: "center" });
-  });
+  }
+
+  /* PayPal deposit
+     The browser only ever sees the public client ID. Creating and capturing
+     the payment goes through server.js, which holds the secret key. */
+  let paypalReady = null;    // promise: loads config + PayPal SDK once
+  let activeBooking = null;  // the booking the buttons are paying for
+
+  function loadPayPal() {
+    if (paypalReady) return paypalReady;
+    paypalReady = fetch("/api/config")
+      .then(r => { if (!r.ok) throw new Error("no server"); return r.json(); })
+      .then(cfg => {
+        if (!cfg.clientId) throw new Error("no keys");
+        $("deposit-amt").textContent = `$${cfg.deposit}`;
+        return new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(cfg.clientId)}` +
+                  `&currency=${cfg.currency}&intent=capture&components=buttons`;
+          s.onload = resolve;
+          s.onerror = () => reject(new Error("sdk"));
+          document.head.appendChild(s);
+        });
+      })
+      .then(renderPayPalButtons);
+    paypalReady.catch(() => { paypalReady = null; });  // allow a retry later
+    return paypalReady;
+  }
+
+  async function postJson(url, data) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    const json = await r.json();
+    if (!r.ok) throw new Error(json.error || "Request failed");
+    return json;
+  }
+
+  function bookingForServer(b) {
+    const svc = getService(b.serviceId);
+    return { service: svc.name, date: b.date, time: b.time, name: b.name, phone: b.phone };
+  }
+
+  function renderPayPalButtons() {
+    const msg = $("pay-msg");
+    return paypal.Buttons({
+      style: { layout: "vertical", color: "gold", shape: "pill", label: "pay" },
+      createOrder: async () => {
+        msg.textContent = "";
+        const order = await postJson("/api/orders", { booking: bookingForServer(activeBooking) });
+        return order.id;
+      },
+      onApprove: async data => {
+        msg.textContent = "Confirming your deposit…";
+        msg.className = "hint";
+        const result = await postJson(`/api/orders/${data.orderID}/capture`, { booking: bookingForServer(activeBooking) });
+        if (result.paid) {
+          finishBooking(activeBooking, { orderId: result.orderId, captureId: result.captureId, amount: result.amount });
+        } else {
+          msg.textContent = `Payment not completed (status: ${result.status}). Please try again.`;
+          msg.className = "hint error";
+        }
+      },
+      onCancel: () => {
+        msg.textContent = "Payment cancelled. Your time isn't held until the deposit goes through.";
+        msg.className = "hint error";
+      },
+      onError: err => {
+        console.error(err);
+        msg.textContent = "PayPal had a problem. Please try again.";
+        msg.className = "hint error";
+      },
+    }).render("#paypal-buttons");
+  }
+
+  function startDeposit(booking) {
+    activeBooking = booking;
+    const msg = $("pay-msg");
+    msg.textContent = "";
+    msg.className = "hint";
+    loadPayPal().catch(err => {
+      // Opened with Live Server (server.js not running) or keys missing.
+      msg.className = "hint error";
+      msg.textContent = err.message === "no keys"
+        ? "PayPal keys are missing. Add them to .env and restart the server."
+        : 'Online deposits need the site\'s server. Run "npm start" and open http://localhost:3000/book.html.';
+      if (!$("skip-deposit")) {
+        const skip = document.createElement("button");
+        skip.type = "button";
+        skip.id = "skip-deposit";
+        skip.className = "btn btn-ghost";
+        skip.textContent = "Book without deposit";
+        skip.addEventListener("click", () => finishBooking(activeBooking, null));
+        $("pay-back").before(skip);
+      }
+    });
+  }
 
   renderAll();
 }

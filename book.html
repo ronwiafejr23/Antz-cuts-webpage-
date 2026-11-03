@@ -70,8 +70,18 @@
               <label>Phone<input type="tel" id="phone" required placeholder="(555) 555-5555"></label>
             </div>
             <p class="hint" id="phone-msg" aria-live="polite"></p>
-            <button type="submit" class="btn btn-primary" id="confirm" disabled>Confirm Booking</button>
+            <button type="submit" class="btn btn-primary" id="confirm" disabled>Continue to Deposit</button>
           </form>
+        </div>
+
+        <!-- Step 5: deposit (PayPal sandbox) -->
+        <div class="card step" id="step-pay" hidden>
+          <h3><span class="step-num">5</span> Hold your spot</h3>
+          <p class="summary" id="pay-summary"></p>
+          <p class="hint">A <b id="deposit-amt">$5</b> deposit locks in your time and comes off your cut. It helps keep no-shows from costing Anthony a chair.</p>
+          <div id="paypal-buttons"></div>
+          <p class="hint" id="pay-msg" aria-live="polite"></p>
+          <button type="button" class="btn btn-ghost" id="pay-back">&larr; Change details</button>
         </div>
 
         <!-- Confirmation -->
@@ -79,6 +89,7 @@
           <div class="confirm-icon">✓</div>
           <h2>You're booked!</h2>
           <p id="confirm-text"></p>
+          <p class="hint" id="confirm-receipt"></p>
           <a href="book.html" class="btn btn-ghost">Book another</a>
         </div>
 

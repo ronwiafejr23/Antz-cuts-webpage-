@@ -885,3 +885,15 @@ nav a{
   color:#b3261e;
 }
 
+
+/* ---------- Step 5: PayPal deposit ---------- */
+#paypal-buttons {
+  max-width: 420px;
+  margin: var(--space-md) 0 var(--space-sm);
+  background: #fff;           /* PayPal buttons read best on white */
+  border-radius: var(--radius);
+  padding: var(--space-sm);
+}
+#paypal-buttons:empty { display: none; }
+#step-pay .btn { margin-top: var(--space-sm); margin-right: var(--space-xs); cursor: pointer; font: inherit; font-weight: 600; }
+button.btn-ghost { background: transparent; }  /* <button> defaults to a light background */

@@ -1,0 +1,8 @@
+# secrets: never commit
+.env
+
+# payment records written by server.js
+deposits.json
+
+node_modules/
+.DS_Store

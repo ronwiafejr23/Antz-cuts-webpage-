@@ -1,0 +1,13 @@
+{
+  "name": "antz-cuts",
+  "version": "1.1.0",
+  "description": "Antz Cuts barber site with online booking and PayPal sandbox deposits",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
