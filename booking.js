@@ -484,9 +484,10 @@ function initBookingPage() {
     loadPayPal().catch(err => {
       // Opened with Live Server (server.js not running) or keys missing.
       msg.className = "hint error";
-      msg.textContent = err.message === "no keys"
-        ? "PayPal keys are missing. Add them to .env and restart the server."
-        : 'Online deposits need the site\'s server. Run "npm start" and open http://localhost:3000/book.html.';
+      msg.textContent =
+        err.message === "no keys" ? "PayPal keys are missing. Add them to .env and restart the server." :
+        err.message === "sdk"     ? "PayPal didn't accept the Client ID. Re-copy it into .env from developer.paypal.com and restart the server." :
+        'Online deposits need the site\'s server. Run "npm start" and open http://localhost:3000/book.html.';
       if (!$("skip-deposit")) {
         const skip = document.createElement("button");
         skip.type = "button";
