@@ -5,7 +5,7 @@
 Book a cut by chatting. **Google Gemini** works out what you want ("fade for my son Friday after 5"), the site finds a **real open chair**, and **PayPal** holds it with a $5 no-show deposit, or with an **$85 Unlimited Haircuts Membership**. It installs to a phone's home screen like an app.
 
 **▶ Live demo:** https://antz-cuts.onrender.com (free hosting sleeps when idle, so the first load can take ~30 seconds)
-**▶ Video (under 3 min):** `ADD-YOUR-YOUTUBE-LINK-HERE`
+**▶ Video (under 3 min):** https://youtu.be/IXEO04BMALM
 
 ---
 
