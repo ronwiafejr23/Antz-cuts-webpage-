@@ -7,6 +7,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0e0e0f">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Antz Cuts">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
 
@@ -34,6 +41,26 @@
 
     <section style="padding-top: 20px;">
       <div class="container booking">
+
+        <!-- AI booking assistant (Gemini) -->
+        <div class="card assistant" id="assistant">
+          <h3>
+            <svg class="ai-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9L12 2zm7 11l.9 2.6 2.6.9-2.6.9L19 20l-.9-2.6-2.6-.9 2.6-.9L19 13zM5 15l.7 1.8 1.8.7-1.8.7L5 20l-.7-1.8-1.8-.7 1.8-.7L5 15z"/></svg>
+            Book by chatting
+          </h3>
+          <p class="hint">Tell me what you need and when. I'll find a real open chair, then you hold it with PayPal.</p>
+          <div class="chat-log" id="chat-log" aria-live="polite"></div>
+          <div class="chat-chips" id="chat-chips">
+            <button type="button" class="chip">Fade Friday after 5</button>
+            <button type="button" class="chip">Kids cut for my son tomorrow</button>
+            <button type="button" class="chip">How does the membership work?</button>
+          </div>
+          <form class="chat-form" id="chat-form">
+            <label class="sr-only" for="chat-input">Message the booking assistant</label>
+            <input type="text" id="chat-input" maxlength="500" autocomplete="off" placeholder="e.g. lineup Saturday morning, I'm Jay 717-555-0123">
+            <button type="submit" class="btn btn-primary" id="chat-send">Send</button>
+          </form>
+        </div>
 
         <!-- Unlimited Haircuts Membership (PayPal, one-time 30-day pass) -->
         <div class="card member" id="membership">
@@ -150,5 +177,6 @@
   </footer>
 
   <script src="booking.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

@@ -1,51 +1,97 @@
-# Antz Cuts
+<p align="center"><img src="icons/logo.png" width="140" alt="Antz Cuts logo"></p>
 
-Website for **Antz Cuts**, Anthony Williams' barbershop: home, about, contact, a style finder, and an online booking page.
+# Antz Cuts: AI booking + PayPal for a neighborhood barbershop
 
-## Booking + PayPal deposits
+Book a cut by chatting. **Google Gemini** works out what you want ("fade for my son Friday after 5"), the site finds a **real open chair**, and **PayPal** holds it with a $5 no-show deposit, or with an **$85 Unlimited Haircuts Membership**. It installs to a phone's home screen like an app.
 
-`book.html` walks a client through 5 steps:
+**▶ Live demo:** `ADD-YOUR-RENDER-URL-HERE` (see [Deploy to Render](#deploy-to-render))
+**▶ Video (under 3 min):** `ADD-YOUR-YOUTUBE-LINK-HERE`
 
-1. Choose a service
-2. Pick a day
-3. Pick a time (only open slots show)
-4. Name + phone
-5. **Pay a $5 deposit with PayPal** to hold the spot (no-show protection)
+---
 
-The booking is confirmed only after PayPal says the payment is `COMPLETED`.
+## Try it as a judge (2 minutes)
 
-### How the payment is kept safe
+1. Open the live demo and go to **Book Now**.
+2. In **Book by chatting**, tap *Fade Friday after 5* or type your own request.
+3. The assistant fills in the service, day and time with a real open slot. Add a name and 10-digit phone, then **Continue to Deposit**.
+4. Pay the $5 deposit with the PayPal sandbox buyer below. The booking confirms with the PayPal order ID.
+5. Tap the gold **Unlimited Haircuts Membership** card, pay $85 in sandbox, then book again: haircuts 1–4 skip the deposit, and the 5th is free when you bring someone.
 
-| Piece | Where it lives | Why |
-|---|---|---|
-| PayPal **client ID** | sent to the browser by `/api/config` | public by design |
-| PayPal **secret** | `.env` on the server only | never in browser code or on GitHub (`.env` is in `.gitignore`) |
-| Deposit amount | `server.js` (`DEPOSIT`) | the browser can't change what gets charged |
+**PayPal sandbox buyer (fake money):**
+- Email: `ADD-SANDBOX-PERSONAL-EMAIL@personal.example.com`
+- Password: `ADD-SANDBOX-PASSWORD`
 
-`server.js` creates the order (`POST /v2/checkout/orders`) and captures it (`POST /v2/checkout/orders/:id/capture`). Paid deposits are logged to `deposits.json` (also git-ignored).
+## Features
 
-## Run it
+| | |
+|---|---|
+| **AI booking assistant** | Gemini turns plain language into structured intent (service, date, time rule, name, phone) using JSON-schema output. The browser matches it against real availability, so the AI can't double-book or invent a time. It also answers questions about prices, hours and the membership. |
+| **PayPal no-show deposits** | $5 deposit via PayPal Orders v2 (create + capture on the server). A booking confirms only after PayPal returns `COMPLETED` for the exact amount. |
+| **Unlimited Haircuts Membership** | $85 one-time 30-day pass through PayPal. Members' haircuts skip the deposit; from the 5th cut on they stay free when bringing a guest. |
+| **Installable app (PWA)** | Manifest, icons and an offline-friendly service worker. "Install app" button on Chrome/Edge/Android; Share → Add to Home Screen on iPhone. |
+| **Secure by design** | PayPal secret and Gemini key live only on the server (`.env` / Render env vars). Prices are set server-side. The AI endpoint is rate-limited. |
 
-Needs [Node.js](https://nodejs.org) 18 or newer. No `npm install` needed.
+## How it works
+
+```
+Customer ──chat──▶ book.html ──POST /api/assistant──▶ server.js ──▶ Google Gemini
+                     │  ◀── intent JSON (service, date, time rule) ──┘
+                     │  match intent to REAL open slots (booking.js)
+                     ▼
+              PayPal Buttons ──POST /api/orders──────────▶ server.js ──▶ PayPal Orders v2 (create)
+                             ──POST /api/orders/:id/capture▶ server.js ──▶ PayPal (capture, verify amount)
+                     ▼
+              Booking confirmed + "Send to Anthony" email
+```
+
+## Run it locally
+
+Needs **Node.js 18+**. There are no npm packages to install.
 
 ```bash
-cp .env.example .env      # Windows: copy .env.example .env
-# paste your PayPal sandbox Client ID and Secret into .env
+git clone https://github.com/ronwiafejr23/Ant-s-cuts-webpage-.git
+cd Ant-s-cuts-webpage-
+cp .env.example .env        # Windows: copy .env.example .env
+```
+
+Fill in `.env`:
+
+| Key | Where to get it (free) |
+|---|---|
+| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | [developer.paypal.com](https://developer.paypal.com) → Apps & Credentials → **Sandbox** → Create App |
+| `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) → Get API key |
+
+```bash
 npm start
 ```
 
-Open **http://localhost:3000/book.html**.
+Open **http://localhost:3000/book.html**. To pay, log in to the PayPal popup with a sandbox **personal** account (developer.paypal.com → Testing Tools → Sandbox Accounts).
 
-To test a payment, log in to the PayPal popup with a **sandbox personal (buyer) account** from developer.paypal.com → Testing Tools → Sandbox Accounts. No real money moves in sandbox.
+On Windows you can also double-click `start-server.bat`.
 
-> Opening the site with VS Code Live Server still works for the pages, but the deposit step needs `npm start`. Under Live Server it shows a "Book without deposit" fallback.
+## Deploy to Render
+
+1. Push this repo to GitHub.
+2. On [render.com](https://render.com): **New → Blueprint** → pick this repo. `render.yaml` sets everything up.
+3. Paste `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and `GEMINI_API_KEY` when Render asks.
+4. Open the `https://antz-cuts-….onrender.com` URL. Free instances sleep after inactivity, so the first load can take ~30 seconds.
 
 ## Files
 
 ```
-index.html  about.html  contact.html  style-finder.html  book.html
-styles.css       shared styles
-booking.js       booking page logic + PayPal buttons
-server.js        static server + PayPal API (holds the secret)
-.env.example     template for your keys
+index.html  about.html  contact.html  style-finder.html  book.html   pages
+styles.css                  shared styles
+booking.js                  booking flow, AI chat, PayPal buttons, membership
+server.js                   static server + PayPal Orders API + Gemini (holds the secrets)
+app.js, sw.js, manifest.webmanifest, icons/   installable app
+render.yaml                 one-click Render deploy
+.env.example                template for your keys
 ```
+
+## Built during the hackathon
+
+The original Antz Cuts site was a static course project: pages plus a booking calendar that only saved to the browser. During the submission period it gained the Gemini booking assistant, the server, PayPal deposits, the PayPal membership, the installable app and the Render deploy.
+
+## License
+
+[MIT](LICENSE)

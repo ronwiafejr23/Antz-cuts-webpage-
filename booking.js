@@ -666,6 +666,144 @@ function initBookingPage() {
 
   renderMembership();
 
+  /* ---------- AI booking assistant ----------
+     server.js asks Gemini to turn the message into intent (service, day,
+     time rule, name, phone). Here we match that intent against the REAL
+     open slots, fill in the form, and leave the PayPal step to the customer. */
+  const chat = { history: [], busy: false };
+
+  function say(role, text) {
+    const bubble = document.createElement("div");
+    bubble.className = `bubble ${role === "user" ? "from-user" : "from-ai"}`;
+    bubble.textContent = text;
+    $("chat-log").appendChild(bubble);
+    $("chat-log").scrollTop = $("chat-log").scrollHeight;
+    return bubble;
+  }
+
+  function assistantContext() {
+    const now = new Date();
+    return {
+      today: `${now.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} (${dateKey(now)})`,
+      now: toHHMM(now.getHours() * 60 + now.getMinutes()),
+      services: SERVICES.map(s => ({ ...s, covered: COVERED_SERVICES.includes(s.id) })),
+      hours: WEEKLY_HOURS,
+    };
+  }
+
+  // Choose a real open slot that fits what the customer asked for.
+  function pickSlot(serviceId, intent) {
+    const asked = /^\d{4}-\d{2}-\d{2}$/.test(intent.date || "") ? intent.date : null;
+    const want = /^\d{2}:\d{2}$/.test(intent.time || "") ? intent.time : null;
+    const rule = intent.timeRule || (want ? "exact" : "earliest");
+    const start = asked && parseKey(asked) >= parseKey(todayKey()) ? parseKey(asked) : parseKey(todayKey());
+
+    for (let i = 0; i <= 21; i++) {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      if (d > lastDay) break;
+      const key = dateKey(d);
+      let times = availableTimes(key, serviceId);
+      if (want && rule === "after")  times = times.filter(t => t >= want);
+      if (want && rule === "before") times = times.filter(t => t < want);
+      if (want && rule === "exact") {
+        const exact = times.find(t => t === want);
+        if (exact) return { date: key, time: exact, onAskedDay: key === asked };
+        // No exact match: offer the closest time that day instead.
+        times = times.slice().sort((a, b) => Math.abs(toMinutes(a) - toMinutes(want)) - Math.abs(toMinutes(b) - toMinutes(want)));
+      }
+      if (times.length) {
+        return { date: key, time: rule === "latest" ? times[times.length - 1] : times[0], onAskedDay: key === asked };
+      }
+    }
+    return null;
+  }
+
+  function applyIntent(intent) {
+    if (intent.name && !$("name").value.trim()) $("name").value = intent.name.slice(0, 60);
+    if (intent.phone && !$("phone").value.trim()) { $("phone").value = intent.phone.slice(0, 20); checkPhone(); }
+
+    if (intent.action === "join_membership") {
+      if (!activeMembership() && $("member-checkout").hidden) $("member-open").click();
+      $("membership").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (intent.action !== "book") { updateSummary(); return; }
+
+    const serviceId = getService(intent.serviceId) ? intent.serviceId : state.serviceId;
+    if (!serviceId) { say("ai", "Which service do you want? Tap one in step 1 or just tell me."); return; }
+
+    const slot = pickSlot(serviceId, intent);
+    if (!slot) {
+      state.serviceId = serviceId;
+      renderAll();
+      say("ai", "I couldn't find an open chair that matches in the next 3 weeks. Want to try a different day or time?");
+      return;
+    }
+
+    showSteps(false);
+    state.serviceId = serviceId;
+    state.date = slot.date;
+    state.time = slot.time;
+    state.month = new Date(parseKey(slot.date).getFullYear(), parseKey(slot.date).getMonth(), 1);
+    renderAll();
+
+    const svc = getService(serviceId);
+    const asked = /^\d{4}-\d{2}-\d{2}$/.test(intent.date || "");
+    const note = asked && !slot.onAskedDay ? "Nothing's open then, so here's the closest opening: " : "Found one: ";
+    const member = memberCovers({ serviceId, date: slot.date });
+    const pay = member && member.cutsUsed < 4
+      ? "your membership covers it, so no deposit needed."
+      : `hit "Continue to Deposit" to hold it with a $5 PayPal deposit.`;
+    const needDetails = !$("name").value.trim() || $("phone").value.replace(/\D/g, "").length < 10;
+    say("ai", `${note}${svc.name} on ${prettyDate(slot.date)} at ${prettyTime(slot.time)}. ` +
+              (needDetails ? "Add your name and phone below, then " + pay : pay.charAt(0).toUpperCase() + pay.slice(1)));
+
+    $("step-details").scrollIntoView({ behavior: "smooth", block: "start" });
+    $("step-details").classList.add("flash");
+    setTimeout(() => $("step-details").classList.remove("flash"), 1600);
+    (needDetails ? (!$("name").value.trim() ? $("name") : $("phone")) : $("confirm")).focus({ preventScroll: true });
+  }
+
+  async function sendChat(text) {
+    text = text.trim();
+    if (!text || chat.busy) return;
+    chat.busy = true;
+    $("chat-send").disabled = true;
+    $("chat-chips").hidden = true;
+    say("user", text);
+    $("chat-input").value = "";
+    const typing = say("ai", "…");
+    typing.classList.add("typing");
+    try {
+      let r;
+      try {
+        r = await fetch("/api/assistant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, history: chat.history, context: assistantContext() }),
+        });
+      } catch { throw new Error("no server"); }
+      const intent = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(r.status === 404 || r.status === 405 ? "no server" : intent.error || "Something went wrong.");
+      typing.remove();
+      chat.history.push({ role: "user", text }, { role: "model", text: JSON.stringify(intent) });
+      if (intent.reply) say("ai", intent.reply);
+      applyIntent(intent);
+    } catch (err) {
+      typing.remove();
+      say("ai", err.message === "no server"
+        ? 'The assistant needs the site\'s server. Run "npm start" and open http://localhost:3000/book.html.'
+        : err.message);
+    } finally {
+      chat.busy = false;
+      $("chat-send").disabled = false;
+    }
+  }
+
+  $("chat-form").addEventListener("submit", e => { e.preventDefault(); sendChat($("chat-input").value); });
+  $("chat-chips").addEventListener("click", e => { if (e.target.matches(".chip")) sendChat(e.target.textContent); });
+  say("ai", "Hey! I'm the Antz Cuts booking assistant. What can I set up for you?");
+
   // Links from other pages can pre-pick a service: book.html?service=adult
   const fromLink = new URLSearchParams(location.search).get("service");
   if (getService(fromLink)) state.serviceId = fromLink;

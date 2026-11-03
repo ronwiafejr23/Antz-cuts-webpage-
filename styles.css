@@ -977,3 +977,64 @@ button.btn-ghost { background: transparent; }  /* <button> defaults to a light b
   .member-checkout .row { grid-template-columns: 1fr; }
   .member-title { font-size: 1.35rem; }
 }
+
+/* ---------- AI booking assistant (book.html) ---------- */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+
+.assistant h3 { display: flex; align-items: center; gap: 10px; }
+.ai-icon { width: 24px; height: 24px; fill: var(--gold-1); flex: none; }
+
+.chat-log {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 320px; overflow-y: auto;
+  margin: var(--space-sm) 0; padding: 4px 2px;
+}
+.bubble {
+  max-width: 85%; padding: 10px 14px; border-radius: 16px;
+  line-height: 1.45; font-size: 0.95rem; white-space: pre-wrap;
+}
+.bubble.from-ai   { align-self: flex-start; background: var(--color-bg); border: 1px solid var(--color-border); border-bottom-left-radius: 4px; }
+.bubble.from-user { align-self: flex-end; background: var(--color-accent); color: #111; border-bottom-right-radius: 4px; }
+.bubble.typing { color: var(--color-muted); letter-spacing: 0.2em; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: 0.4; } }
+
+.chat-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--space-sm); }
+.chip {
+  padding: 8px 14px; border-radius: var(--radius-pill);
+  border: 1px solid var(--gold-2); background: transparent; color: var(--gold-1);
+  font: inherit; font-size: 0.88rem; cursor: pointer;
+}
+.chip:hover { background: rgba(212, 160, 23, 0.12); }
+
+.chat-form { display: flex; gap: 8px; }
+.chat-form input {
+  flex: 1; min-width: 0; padding: 12px 14px; font: inherit;
+  color: var(--color-text); background: var(--color-bg);
+  border: 1px solid var(--color-border); border-radius: var(--radius-pill);
+}
+.chat-form input:focus { outline: none; border-color: var(--gold-2); }
+.chat-form .btn { border: 0; cursor: pointer; font: inherit; font-weight: 600; }
+.chat-form .btn:disabled { opacity: 0.5; cursor: wait; }
+
+.step.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px var(--gold-2); } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble.typing, .step.flash { animation: none; }
+}
+
+/* ---------- "Install app" button (added by app.js when installable) ---------- */
+.install-btn {
+  padding: 8px 16px; border-radius: var(--radius-pill);
+  border: 1px solid var(--gold-2); background: transparent; color: var(--gold-1);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.install-btn:hover { background: rgba(212, 160, 23, 0.12); }
+
+/* Installed app: leave room for the phone's status bar */
+@media (display-mode: standalone) {
+  header { padding-top: env(safe-area-inset-top); }
+}
+
+/* Grid children may shrink below their content width on phones */
+.booking > * { min-width: 0; }

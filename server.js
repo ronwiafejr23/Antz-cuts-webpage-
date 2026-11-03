@@ -129,15 +129,116 @@ async function captureMembership(orderId, member) {
            start: start?.toISOString(), expires: expires?.toISOString() };
 }
 
+/* ---------- AI booking assistant (Google Gemini) ----------
+   The customer types something like "fade for my son friday after 5".
+   Gemini turns it into structured booking intent (service, day, time rule,
+   name, phone) plus a short friendly reply. The browser then matches that
+   intent against REAL open slots, so the AI can never double-book a chair.
+   The final step is always a PayPal payment (deposit or membership). */
+
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
+
+const ASSISTANT_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    reply:     { type: "STRING", description: "1-3 short, friendly sentences to show the customer." },
+    action:    { type: "STRING", enum: ["none", "book", "join_membership"] },
+    serviceId: { type: "STRING", description: "One of the service ids, or empty." },
+    date:      { type: "STRING", description: "YYYY-MM-DD, or empty if the customer didn't say a day." },
+    time:      { type: "STRING", description: "HH:MM 24-hour, or empty." },
+    timeRule:  { type: "STRING", enum: ["", "exact", "after", "before", "earliest", "latest"] },
+    name:      { type: "STRING", description: "Customer's name if they gave it, else empty." },
+    phone:     { type: "STRING", description: "Customer's phone if they gave it, else empty." },
+  },
+  required: ["reply", "action", "serviceId", "date", "time", "timeRule", "name", "phone"],
+};
+
+function assistantPrompt(ctx) {
+  const services = (ctx.services || []).slice(0, 20)
+    .map(s => `- ${s.id}: ${s.name}, ${s.price}, ${s.minutes} min${s.covered ? " (covered by membership)" : ""}`).join("\n");
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const hours = days.map((d, i) => {
+    const h = ctx.hours && ctx.hours[i];
+    return `- ${d}: ${h ? `${h.open}-${h.close}` : "closed"}`;
+  }).join("\n");
+  return `You are the booking assistant for Antz Cuts, Anthony Williams' barbershop.
+Today is ${String(ctx.today || "").slice(0, 40)} (customer's local time ${String(ctx.now || "").slice(0, 10)}).
+
+Services (id: name, price, length):
+${services}
+
+Weekly hours:
+${hours}
+
+Payments (PayPal):
+- Every booking is held with a $${DEPOSIT} PayPal deposit that comes off the cut. It protects against no-shows.
+- Unlimited Haircuts Membership: $${Number(MEMBERSHIP)} paid once through PayPal for ${MEMBERSHIP_DAYS} days of unlimited haircuts.
+  Members' haircuts skip the deposit. On the 5th cut it's still free when they bring someone with them to the appointment.
+
+Rules:
+- If the customer wants an appointment, set action "book". Pick the closest serviceId (kids = 11 and under, adult = 12+,
+  "fade", "lineup", "trim" or a plain "haircut" = adult unless it's for a child; "first time" = first).
+- Resolve relative days ("tomorrow", "friday", "next week") to a YYYY-MM-DD date on or after today.
+  "this weekend" = the next open weekend day.
+- Times: "after 5" -> time 17:00, timeRule "after". "at 6:30" -> 18:30 "exact". "morning" -> 12:00 "before".
+  "evening" -> 17:00 "after". "asap"/"soonest"/no time -> timeRule "earliest". Leave time empty when not given.
+- If they ask about joining, unlimited cuts or a membership, set action "join_membership" and briefly explain it.
+- For questions (prices, hours, policy), answer with action "none". Never invent services, prices or hours.
+- Don't promise a specific slot is free; the website checks real availability and will confirm.
+- Keep replies short, warm and casual. No markdown.`;
+}
+
+// Very small in-memory rate limit so a public demo can't burn the API key.
+const hits = new Map();
+function rateLimited(ip) {
+  const now = Date.now(), windowMs = 10 * 60 * 1000, max = 40;
+  const list = (hits.get(ip) || []).filter(t => now - t < windowMs);
+  list.push(now);
+  hits.set(ip, list);
+  return list.length > max;
+}
+
+async function askAssistant({ message, history = [], context = {} }) {
+  if (!GEMINI_KEY) throw Object.assign(new Error("The AI assistant isn't set up yet (GEMINI_API_KEY missing)."), { status: 503 });
+  const text = String(message || "").trim().slice(0, 500);
+  if (!text) throw Object.assign(new Error("Empty message"), { status: 400 });
+
+  const contents = history.slice(-8)
+    .filter(h => h && (h.role === "user" || h.role === "model") && h.text)
+    .map(h => ({ role: h.role, parts: [{ text: String(h.text).slice(0, 600) }] }));
+  contents.push({ role: "user", parts: [{ text }] });
+
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: assistantPrompt(context) }] },
+      contents,
+      generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: ASSISTANT_SCHEMA },
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.error("Gemini error:", data.error || res.status);
+    throw Object.assign(new Error("The AI assistant is busy right now. Try again in a moment."), { status: 502 });
+  }
+  const raw = data.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("") || "{}";
+  let out;
+  try { out = JSON.parse(raw); } catch { out = { reply: raw, action: "none" }; }
+  return out;
+}
+
 /* ---------- tiny static file server ---------- */
 
 const TYPES = {
   ".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript",
   ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml", ".mp4": "video/mp4", ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json",
 };
 // Never serve these over the web.
-const PRIVATE = new Set([".env", ".env.example", "server.js", "package.json", "deposits.json", "memberships.json", "start-server.bat"]);
+const PRIVATE = new Set([".env", ".env.example", "server.js", "package.json", "deposits.json", "memberships.json", "start-server.bat", "render.yaml"]);
 
 function serveStatic(req, res) {
   const urlPath = decodeURIComponent(new URL(req.url, "http://x").pathname);
@@ -172,7 +273,7 @@ http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/api/config") {
       // The client ID is public by design; the secret never leaves this file.
-      return sendJson(res, 200, { clientId: CLIENT_ID || null, deposit: DEPOSIT, membership: MEMBERSHIP, membershipDays: MEMBERSHIP_DAYS, currency: CURRENCY });
+      return sendJson(res, 200, { clientId: CLIENT_ID || null, deposit: DEPOSIT, membership: MEMBERSHIP, membershipDays: MEMBERSHIP_DAYS, currency: CURRENCY, assistant: Boolean(GEMINI_KEY) });
     }
     if (req.method === "POST" && req.url === "/api/orders") {
       const { booking = {} } = await readJson(req);
@@ -194,12 +295,17 @@ http.createServer(async (req, res) => {
       const { member = {} } = await readJson(req);
       return sendJson(res, 200, await captureMembership(mem[1], member));
     }
+    if (req.method === "POST" && req.url === "/api/assistant") {
+      const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.socket.remoteAddress;
+      if (rateLimited(ip)) return sendJson(res, 429, { error: "Too many messages. Take a breather and try again in a few minutes." });
+      return sendJson(res, 200, await askAssistant(await readJson(req)));
+    }
     if (req.method === "GET") return serveStatic(req, res);
     sendJson(res, 404, { error: "Not found" });
   } catch (err) {
     console.error(err);
-    sendJson(res, 500, { error: err.message });
+    sendJson(res, err.status || 500, { error: err.message });
   }
 }).listen(PORT, () => {
-  console.log(`Antz Cuts running at http://localhost:${PORT}  (PayPal ${PAYPAL_API.includes("sandbox") ? "SANDBOX" : "LIVE"})`);
+  console.log(`Antz Cuts running at http://localhost:${PORT}  (PayPal ${PAYPAL_API.includes("sandbox") ? "SANDBOX" : "LIVE"}, AI ${GEMINI_KEY ? GEMINI_MODEL : "off - add GEMINI_API_KEY to .env"})`);
 });

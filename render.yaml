@@ -1,0 +1,21 @@
+# Render Blueprint: render.com > New > Blueprint > pick this repo.
+# Render asks for the three secret values below; they never live in GitHub.
+services:
+  - type: web
+    name: antz-cuts
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/config
+    envVars:
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: NODE_VERSION
+        value: "22"
